@@ -5,7 +5,12 @@ project(
     LANGUAGES CXX C # programming languages used by the project
 )
 
-add_executable(App main.cpp)
+add_subdirectory(webgpu)
+add_executable(App
+	main.cpp
+	webgpu-utils.h
+	webgpu-utils.cpp
+)
 # Add the 'webgpu' target as a dependency of our App
 target_link_libraries(App PRIVATE webgpu)
 
@@ -22,7 +27,6 @@ else()
     target_compile_options(App PRIVATE -Wall -Wextra -pedantic)
 endif()
 
-add_subdirectory(webgpu)
 
 # The application's binary must find wgpu.dll or libwgpu.so at runtime,
 # so we automatically copy it (it's called WGPU_RUNTIME_LIB in general)
@@ -34,4 +38,5 @@ target_copy_webgpu_binaries(App)
 if (EMSCRIPTEN)
     # Generate a full web page rather than a simple WebAssembly module
     set_target_properties(App PROPERTIES SUFFIX ".html")
+    target_link_options(App PRIVATE -sASYNCIFY)
 endif()
