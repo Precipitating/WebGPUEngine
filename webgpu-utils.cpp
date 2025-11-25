@@ -377,9 +377,93 @@ WGPUDevice GetDevice(WGPUInstance& instance, WGPUAdapter& adapter)
 	return device;
 
 }
+#pragma endregion
 
 
+#pragma region Command_Queue
+WGPUQueue SetupCommandQueue(const WGPUDevice& device)
+{
+	WGPUQueue queue = wgpuDeviceGetQueue(device);
+
+	return queue
+;
+
+}
+
+WGPUCommandBuffer BuildCommandBuffer(const WGPUDevice& device)
+{
+	// - encoder
+	WGPUCommandEncoderDescriptor encoderDesc = {};
+	encoderDesc.label = toWgpuStringView("My command encoder");
+	encoderDesc.nextInChain = nullptr;
+	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, &encoderDesc);
+
+	// commands
+	wgpuCommandEncoderInsertDebugMarker(encoder, toWgpuStringView("Do one thing"));
+	wgpuCommandEncoderInsertDebugMarker(encoder, toWgpuStringView("Do another thing"));
+
+	// - buffer
+	WGPUCommandBufferDescriptor cmdBufferDescriptor = {};
+	cmdBufferDescriptor.nextInChain = nullptr;
+	cmdBufferDescriptor.label = toWgpuStringView("Command buffer");
+	WGPUCommandBuffer command = wgpuCommandEncoderFinish(encoder, &cmdBufferDescriptor);
+
+	wgpuCommandEncoderRelease(encoder); // release encoder after it's finished
+
+	return command;
 
 
+}
+
+void SubmitCommandQueue(const WGPUInstance& instance, const WGPUQueue& queue, const WGPUCommandBuffer& command)
+{
+	// - submit command queue
+	std::cout << "Submitting command..." << std::endl;
+	wgpuQueueSubmit(queue, 1, &command);
+	wgpuCommandBufferRelease(command);
+	std::cout << "Command submitted." << std::endl;
+
+	// Device polling
+	// Our callback invoked when GPU instructions have been executed
+	auto onQueuedWorkDone = [](
+		WGPUQueueWorkDoneStatus status,
+		void* userdata1,
+		void* /* userdata2 */
+		) {
+			// Display a warning when status is not success
+			if (status != WGPUQueueWorkDoneStatus_Success) {
+				std::cout << "Warning: wgpuQueueOnSubmittedWorkDone failed, this is suspicious!" << std::endl;
+			}
+
+			// Interpret userdata1 as a pointer to a boolean (and turn it into a
+			// mutable reference), then turn it to 'true'
+			bool& workDone = *reinterpret_cast<bool*>(userdata1);
+			workDone = true;
+		};
+
+	// Create the boolean that will be passed to the callback as userdata1
+	// and initialize it to 'false'
+	bool workDone = false;
+
+	// Create the callback info
+	WGPUQueueWorkDoneCallbackInfo callbackInfo = {};
+	callbackInfo.nextInChain = nullptr;
+	callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+	callbackInfo.callback = onQueuedWorkDone;
+	callbackInfo.userdata1 = &workDone; // pass the address of workDone
+
+	// Add the async operation to the queue
+	wgpuQueueOnSubmittedWorkDone(queue, callbackInfo);
+
+	// Hand the execution to the WebGPU instance until onQueuedWorkDone gets invoked
+	wgpuInstanceProcessEvents(instance);
+	while (!workDone) {
+		sleepForMilliseconds(200);
+		wgpuInstanceProcessEvents(instance);
+	}
+
+	std::cout << "All queued instructions have been executed!" << std::endl;
+
+}
 
 #pragma endregion

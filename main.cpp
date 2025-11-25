@@ -22,16 +22,21 @@ int main (int, char**)
 
 	// We no longer need to access the adapter once we have the device
 	wgpuAdapterRelease(adapter);
+
+
+	// Command queue
+	WGPUQueue queue = SetupCommandQueue(device);
+	WGPUCommandBuffer command = BuildCommandBuffer(device);
+	SubmitCommandQueue(instance, queue, command);
+
+
+	wgpuQueueRelease(queue);
 	wgpuDeviceRelease(device);
 
 	// We clean up the WebGPU instance
 	wgpuInstanceRelease(instance);
 
-
-
-
-
-
+	return 0;
 
 
 }

@@ -61,3 +61,13 @@ WGPUDevice GetDevice(WGPUInstance& instance, WGPUAdapter& adapter);
 
 
 #pragma endregion
+
+
+#pragma region Command_Queue
+WGPUQueue SetupCommandQueue(const WGPUDevice& device);
+
+WGPUCommandBuffer BuildCommandBuffer(const WGPUDevice& device);
+
+void SubmitCommandQueue(const WGPUInstance& instance, const WGPUQueue& queue, const WGPUCommandBuffer& command);
+
+#pragma endregion
