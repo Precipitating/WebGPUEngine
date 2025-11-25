@@ -25,6 +25,9 @@ WGPUStringView toWgpuStringView(const char* cString);
 void sleepForMilliseconds(unsigned int milliseconds);
 
 
+#pragma region Instance
+WGPUInstance GetInstance();
+#pragma endregion
 
 #pragma region Adapter
 /**
@@ -40,4 +43,21 @@ void SetAdapterLimits(const WGPUAdapter& adapter);
 WGPUAdapter GetAdapter(const WGPUInstance& instance);
 
 void InspectAdapter(const WGPUAdapter& adapter);
+#pragma endregion
+
+
+#pragma region Device
+/**
+ * Utility function to get a WebGPU device, so that
+ *     WGPUDevice device = requestDeviceSync(adapter, options);
+ * is roughly equivalent to
+ *     const device = await adapter.requestDevice(descriptor);
+ * It is very similar to requestAdapter
+ */
+WGPUDevice requestDeviceSync(WGPUInstance instance, WGPUAdapter adapter, WGPUDeviceDescriptor const* descriptor);
+
+
+WGPUDevice GetDevice(WGPUInstance& instance, WGPUAdapter& adapter);
+
+
 #pragma endregion

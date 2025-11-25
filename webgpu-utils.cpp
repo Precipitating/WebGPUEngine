@@ -39,6 +39,37 @@ void sleepForMilliseconds(unsigned int milliseconds)
 }
 
 
+#pragma region Device
+
+WGPUInstance GetInstance()
+{
+	WGPUInstanceDescriptor desc = {};
+	desc.nextInChain = nullptr;
+
+	// We create the instance using this descriptor
+#ifdef WEBGPU_BACKEND_EMSCRIPTEN
+	WGPUInstance instance = wgpuCreateInstance(nullptr);
+#else  //  WEBGPU_BACKEND_EMSCRIPTEN
+	WGPUInstance instance = wgpuCreateInstance(&desc);
+#endif //  WEBGPU_BACKEND_EMSCRIPTEN
+
+	// We can check whether there is actually an instance created
+	if (!instance)
+	{
+		std::cerr << "Could not initialize WebGPU!" << std::endl;
+		return nullptr;
+	}
+
+	// Display the object (WGPUInstance is a simple pointer, it may be
+	// copied around without worrying about its size).
+	std::cout << "WGPU instance: " << instance << std::endl;
+
+	return instance;
+}
+
+#pragma endregion
+
+
 #pragma region Adapter
 WGPUAdapter requestAdapterSync(WGPUInstance instance, WGPURequestAdapterOptions const* options) {
 	// A simple structure holding the local information shared with the
@@ -181,6 +212,173 @@ void InspectAdapter(const WGPUAdapter& adapter)
 	wgpuAdapterInfoFreeMembers(properties);
 
 }
+#pragma endregion
+
+
+#pragma region Device
+WGPUDevice requestDeviceSync(WGPUInstance instance, WGPUAdapter adapter, WGPUDeviceDescriptor const* descriptor)
+{
+	{
+		struct UserData {
+			WGPUDevice device = nullptr;
+			bool requestEnded = false;
+		};
+		UserData userData;
+
+		auto onDeviceRequestEnded = [](
+			WGPURequestDeviceStatus status,
+			WGPUDevice device,
+			WGPUStringView message,
+			void* userdata1,
+			void* /* userdata2 */
+			) {
+				UserData& userData = *reinterpret_cast<UserData*>(userdata1);
+				if (status == WGPURequestDeviceStatus_Success) {
+					userData.device = device;
+				}
+				else {
+					std::cout << "Could not get WebGPU device: " << toStdStringView(message) << std::endl;
+				}
+				userData.requestEnded = true;
+			};
+
+		// Build the callback info
+		WGPURequestDeviceCallbackInfo callbackInfo = {
+			/* nextInChain = */ nullptr,
+			/* mode = */ WGPUCallbackMode_AllowProcessEvents,
+			/* callback = */ onDeviceRequestEnded,
+			/* userdata1 = */ &userData,
+			/* userdata2 = */ nullptr
+		};
+
+		// Call to the WebGPU request adapter procedure
+		wgpuAdapterRequestDevice(adapter, descriptor, callbackInfo);
+
+		// Hand the execution to the WebGPU instance until the request ended
+		wgpuInstanceProcessEvents(instance);
+		while (!userData.requestEnded) {
+			sleepForMilliseconds(200);
+			wgpuInstanceProcessEvents(instance);
+		}
+
+		return userData.device;
+
+	}
+}
+
+// We create a utility function to inspect the device:
+void inspectDevice(WGPUDevice device) {
+
+	WGPUSupportedFeatures features = {};
+	wgpuDeviceGetFeatures(device, &features);
+	std::cout << "Device features:" << std::endl;
+	std::cout << std::hex;
+	for (size_t i = 0; i < features.featureCount; ++i) {
+		std::cout << " - 0x" << features.features[i] << std::endl;
+	}
+	std::cout << std::dec;
+	wgpuSupportedFeaturesFreeMembers(features);
+
+	WGPULimits limits = {};
+	limits.nextInChain = nullptr;
+
+#ifdef WEBGPU_BACKEND_DAWN
+	bool success = wgpuDeviceGetLimits(device, &limits) == WGPUStatus_Success;
+#else
+	bool success = wgpuDeviceGetLimits(device, &limits);
+#endif
+
+	if (success) {
+		std::cout << "Device limits:" << std::endl;
+		std::cout << " - maxTextureDimension1D: " << limits.maxTextureDimension1D << std::endl;
+		std::cout << " - maxTextureDimension2D: " << limits.maxTextureDimension2D << std::endl;
+		std::cout << " - maxTextureDimension3D: " << limits.maxTextureDimension3D << std::endl;
+		std::cout << " - maxTextureArrayLayers: " << limits.maxTextureArrayLayers << std::endl;
+		std::cout << " - maxBindGroups: " << limits.maxBindGroups << std::endl;
+		std::cout << " - maxBindGroupsPlusVertexBuffers: " << limits.maxBindGroupsPlusVertexBuffers << std::endl;
+		std::cout << " - maxBindingsPerBindGroup: " << limits.maxBindingsPerBindGroup << std::endl;
+		std::cout << " - maxDynamicUniformBuffersPerPipelineLayout: " << limits.maxDynamicUniformBuffersPerPipelineLayout << std::endl;
+		std::cout << " - maxDynamicStorageBuffersPerPipelineLayout: " << limits.maxDynamicStorageBuffersPerPipelineLayout << std::endl;
+		std::cout << " - maxSampledTexturesPerShaderStage: " << limits.maxSampledTexturesPerShaderStage << std::endl;
+		std::cout << " - maxSamplersPerShaderStage: " << limits.maxSamplersPerShaderStage << std::endl;
+		std::cout << " - maxStorageBuffersPerShaderStage: " << limits.maxStorageBuffersPerShaderStage << std::endl;
+		std::cout << " - maxStorageTexturesPerShaderStage: " << limits.maxStorageTexturesPerShaderStage << std::endl;
+		std::cout << " - maxUniformBuffersPerShaderStage: " << limits.maxUniformBuffersPerShaderStage << std::endl;
+		std::cout << " - maxUniformBufferBindingSize: " << limits.maxUniformBufferBindingSize << std::endl;
+		std::cout << " - maxStorageBufferBindingSize: " << limits.maxStorageBufferBindingSize << std::endl;
+		std::cout << " - minUniformBufferOffsetAlignment: " << limits.minUniformBufferOffsetAlignment << std::endl;
+		std::cout << " - minStorageBufferOffsetAlignment: " << limits.minStorageBufferOffsetAlignment << std::endl;
+		std::cout << " - maxVertexBuffers: " << limits.maxVertexBuffers << std::endl;
+		std::cout << " - maxBufferSize: " << limits.maxBufferSize << std::endl;
+		std::cout << " - maxVertexAttributes: " << limits.maxVertexAttributes << std::endl;
+		std::cout << " - maxVertexBufferArrayStride: " << limits.maxVertexBufferArrayStride << std::endl;
+		std::cout << " - maxInterStageShaderVariables: " << limits.maxInterStageShaderVariables << std::endl;
+		std::cout << " - maxColorAttachments: " << limits.maxColorAttachments << std::endl;
+		std::cout << " - maxColorAttachmentBytesPerSample: " << limits.maxColorAttachmentBytesPerSample << std::endl;
+		std::cout << " - maxComputeWorkgroupStorageSize: " << limits.maxComputeWorkgroupStorageSize << std::endl;
+		std::cout << " - maxComputeInvocationsPerWorkgroup: " << limits.maxComputeInvocationsPerWorkgroup << std::endl;
+		std::cout << " - maxComputeWorkgroupSizeX: " << limits.maxComputeWorkgroupSizeX << std::endl;
+		std::cout << " - maxComputeWorkgroupSizeY: " << limits.maxComputeWorkgroupSizeY << std::endl;
+		std::cout << " - maxComputeWorkgroupSizeZ: " << limits.maxComputeWorkgroupSizeZ << std::endl;
+		std::cout << " - maxComputeWorkgroupsPerDimension: " << limits.maxComputeWorkgroupsPerDimension << std::endl;
+	}
+}
+
+
+WGPUDevice GetDevice(WGPUInstance& instance, WGPUAdapter& adapter)
+{
+	std::cout << "Requesting device..." << std::endl;
+
+	WGPUDeviceDescriptor deviceDesc = {};
+	deviceDesc.nextInChain = nullptr;
+	deviceDesc.label = toWgpuStringView("My Device"); // anything works here, that's your call
+	deviceDesc.requiredFeatureCount = 0; // we do not require any specific feature
+	deviceDesc.requiredLimits = nullptr; // we do not require any specific limit
+	deviceDesc.defaultQueue.nextInChain = nullptr;
+	deviceDesc.defaultQueue.label = toWgpuStringView("The default queue");
+
+	// device lost callbacks
+	auto onDeviceLost = [](
+		WGPUDevice const* device,
+		WGPUDeviceLostReason reason,
+		struct WGPUStringView message,
+		void* /* userdata1 */,
+		void* /* userdata2 */
+		) {
+			// All we do is display a message when the device is lost
+			std::cout
+				<< "Device " << device << " was lost: reason " << reason
+				<< " (" << toStdStringView(message) << ")"
+				<< std::endl;
+		};
+	deviceDesc.deviceLostCallbackInfo.callback = onDeviceLost;
+	deviceDesc.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+
+	auto onDeviceError = [](
+		WGPUDevice const* device,
+		WGPUErrorType type,
+		struct WGPUStringView message,
+		void* /* userdata1 */,
+		void* /* userdata2 */
+		) {
+			std::cout
+				<< "Uncaptured error in device " << device << ": type " << type
+				<< " (" << toStdStringView(message) << ")"
+				<< std::endl;
+		};
+	deviceDesc.uncapturedErrorCallbackInfo.callback = onDeviceError;
+	WGPUDevice device = requestDeviceSync(instance, adapter, &deviceDesc);
+
+	std::cout << "Got device: " << device << std::endl;
+
+	inspectDevice(device);
+
+
+	return device;
+
+}
+
+
 
 
 
