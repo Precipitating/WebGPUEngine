@@ -1,16 +1,13 @@
-// Includes
+// In main.cpp
 #include "Application.h"
 
 #ifdef __EMSCRIPTEN__
 #  include <emscripten.h>
 #endif // __EMSCRIPTEN__
 
-
-
-
-int main (int, char**) 
-{
+int main() {
 	Application app;
+
 	if (!app.Initialize()) {
 		return 1;
 	}
@@ -32,11 +29,7 @@ int main (int, char**)
 	}
 #endif // __EMSCRIPTEN__
 
-
 	app.Terminate();
 
-
 	return 0;
-
-
 }

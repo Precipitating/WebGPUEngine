@@ -144,7 +144,7 @@ void SetAdapterLimits(const WGPUAdapter& adapter)
 	supportedLimits.nextInChain = nullptr;
 
 #ifdef WEBGPU_BACKEND_DAWN
-	bool success = wgpuAdapterGetLimits(adapter, &supportedLimits) == WGPUStatus_Success;
+	bool success = wgpuAdapterGetLimits(adapter, &supportedLimits) & WGPUStatus_Success;
 #else
 	bool success = wgpuAdapterGetLimits(adapter, &supportedLimits);
 #endif
@@ -165,7 +165,7 @@ WGPUAdapter GetAdapter(const WGPUInstance& instance, const WGPUSurface& surface)
 {
 	std::cout << "Requesting adapter..." << std::endl;
 
-	WGPURequestAdapterOptions adapterOpts = {};
+	WGPURequestAdapterOptions adapterOpts = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
 	adapterOpts.nextInChain = nullptr;
 	adapterOpts.compatibleSurface = surface;
 	WGPUAdapter adapter = requestAdapterSync(instance, &adapterOpts);
@@ -284,7 +284,7 @@ void inspectDevice(WGPUDevice device) {
 	limits.nextInChain = nullptr;
 
 #ifdef WEBGPU_BACKEND_DAWN
-	bool success = wgpuDeviceGetLimits(device, &limits) == WGPUStatus_Success;
+	bool success = wgpuDeviceGetLimits(device, &limits) & WGPUStatus_Success;
 #else
 	bool success = wgpuDeviceGetLimits(device, &limits);
 #endif
@@ -325,146 +325,6 @@ void inspectDevice(WGPUDevice device) {
 	}
 }
 
-
-WGPUDevice GetDevice(WGPUInstance& instance, WGPUAdapter& adapter)
-{
-	std::cout << "Requesting device..." << std::endl;
-
-	WGPUDeviceDescriptor deviceDesc = {};
-	deviceDesc.nextInChain = nullptr;
-	deviceDesc.label = toWgpuStringView("My Device"); // anything works here, that's your call
-	deviceDesc.requiredFeatureCount = 0; // we do not require any specific feature
-	deviceDesc.requiredLimits = nullptr; // we do not require any specific limit
-	deviceDesc.defaultQueue.nextInChain = nullptr;
-	deviceDesc.defaultQueue.label = toWgpuStringView("The default queue");
-
-	// device lost callbacks
-	auto onDeviceLost = [](
-		WGPUDevice const* device,
-		WGPUDeviceLostReason reason,
-		struct WGPUStringView message,
-		void* /* userdata1 */,
-		void* /* userdata2 */
-		) {
-			// All we do is display a message when the device is lost
-			std::cout
-				<< "Device " << device << " was lost: reason " << reason
-				<< " (" << toStdStringView(message) << ")"
-				<< std::endl;
-		};
-	deviceDesc.deviceLostCallbackInfo.callback = onDeviceLost;
-	deviceDesc.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
-
-	auto onDeviceError = [](
-		WGPUDevice const* device,
-		WGPUErrorType type,
-		struct WGPUStringView message,
-		void* /* userdata1 */,
-		void* /* userdata2 */
-		) {
-			std::cout
-				<< "Uncaptured error in device " << device << ": type " << type
-				<< " (" << toStdStringView(message) << ")"
-				<< std::endl;
-		};
-	deviceDesc.uncapturedErrorCallbackInfo.callback = onDeviceError;
-	WGPUDevice device = requestDeviceSync(instance, adapter, &deviceDesc);
-
-	std::cout << "Got device: " << device << std::endl;
-
-	inspectDevice(device);
-
-
-	return device;
-
-}
 #pragma endregion
 
 
-#pragma region Command_Queue
-WGPUQueue SetupCommandQueue(const WGPUDevice& device)
-{
-	WGPUQueue queue = wgpuDeviceGetQueue(device);
-
-	return queue
-;
-
-}
-
-WGPUCommandBuffer BuildCommandBuffer(const WGPUDevice& device)
-{
-	// - encoder
-	WGPUCommandEncoderDescriptor encoderDesc = {};
-	encoderDesc.label = toWgpuStringView("My command encoder");
-	encoderDesc.nextInChain = nullptr;
-	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, &encoderDesc);
-
-	// commands
-	wgpuCommandEncoderInsertDebugMarker(encoder, toWgpuStringView("Do one thing"));
-	wgpuCommandEncoderInsertDebugMarker(encoder, toWgpuStringView("Do another thing"));
-
-	// - buffer
-	WGPUCommandBufferDescriptor cmdBufferDescriptor = {};
-	cmdBufferDescriptor.nextInChain = nullptr;
-	cmdBufferDescriptor.label = toWgpuStringView("Command buffer");
-	WGPUCommandBuffer command = wgpuCommandEncoderFinish(encoder, &cmdBufferDescriptor);
-
-	wgpuCommandEncoderRelease(encoder); // release encoder after it's finished
-
-	return command;
-
-
-}
-
-void SubmitCommandQueue(const WGPUInstance& instance, const WGPUQueue& queue, const WGPUCommandBuffer& command)
-{
-	// - submit command queue
-	std::cout << "Submitting command..." << std::endl;
-	wgpuQueueSubmit(queue, 1, &command);
-	wgpuCommandBufferRelease(command);
-	std::cout << "Command submitted." << std::endl;
-
-	// Device polling
-	// Our callback invoked when GPU instructions have been executed
-	auto onQueuedWorkDone = [](
-		WGPUQueueWorkDoneStatus status,
-		void* userdata1,
-		void* /* userdata2 */
-		) {
-			// Display a warning when status is not success
-			if (status != WGPUQueueWorkDoneStatus_Success) {
-				std::cout << "Warning: wgpuQueueOnSubmittedWorkDone failed, this is suspicious!" << std::endl;
-			}
-
-			// Interpret userdata1 as a pointer to a boolean (and turn it into a
-			// mutable reference), then turn it to 'true'
-			bool& workDone = *reinterpret_cast<bool*>(userdata1);
-			workDone = true;
-		};
-
-	// Create the boolean that will be passed to the callback as userdata1
-	// and initialize it to 'false'
-	bool workDone = false;
-
-	// Create the callback info
-	WGPUQueueWorkDoneCallbackInfo callbackInfo = {};
-	callbackInfo.nextInChain = nullptr;
-	callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
-	callbackInfo.callback = onQueuedWorkDone;
-	callbackInfo.userdata1 = &workDone; // pass the address of workDone
-
-	// Add the async operation to the queue
-	wgpuQueueOnSubmittedWorkDone(queue, callbackInfo);
-
-	// Hand the execution to the WebGPU instance until onQueuedWorkDone gets invoked
-	wgpuInstanceProcessEvents(instance);
-	while (!workDone) {
-		sleepForMilliseconds(200);
-		wgpuInstanceProcessEvents(instance);
-	}
-
-	std::cout << "All queued instructions have been executed!" << std::endl;
-
-}
-
-#pragma endregion

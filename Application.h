@@ -15,8 +15,20 @@ public:
     // Draw a frame and handle events
     void MainLoop();
 
+    bool SetupSurfaceConfig(const WGPUAdapter& adapter);
+
     // Return true as long as the main loop should keep on running
     bool IsRunning();
+
+
+
+
+
+private:
+    WGPUTextureView GetNextSurfaceView();
+    void RenderPassEncoder(const WGPUTextureView& targetView);
+    void SetupDevice(const WGPUAdapter& adapter);
+    WGPUAdapter SetupAdapter();
 
 private:
     GLFWwindow* m_window = nullptr;
@@ -26,3 +38,4 @@ private:
     WGPUSurface m_surface = nullptr;
 
 };
+
