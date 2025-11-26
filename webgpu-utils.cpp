@@ -161,12 +161,13 @@ void SetAdapterLimits(const WGPUAdapter& adapter)
 }
 
 
-WGPUAdapter GetAdapter(const WGPUInstance& instance)
+WGPUAdapter GetAdapter(const WGPUInstance& instance, const WGPUSurface& surface)
 {
 	std::cout << "Requesting adapter..." << std::endl;
 
 	WGPURequestAdapterOptions adapterOpts = {};
 	adapterOpts.nextInChain = nullptr;
+	adapterOpts.compatibleSurface = surface;
 	WGPUAdapter adapter = requestAdapterSync(instance, &adapterOpts);
 
 	std::cout << "Got adapter: " << adapter << std::endl;

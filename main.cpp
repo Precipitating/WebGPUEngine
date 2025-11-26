@@ -1,40 +1,40 @@
 // Includes
-#include <webgpu/webgpu.h>
-#include <cassert>
-#include <vector>
-#include <iostream>
-#include "webgpu-utils.h"
+#include "Application.h"
+
+#ifdef __EMSCRIPTEN__
+#  include <emscripten.h>
+#endif // __EMSCRIPTEN__
+
 
 
 
 int main (int, char**) 
 {
-	// Instance setup
-	WGPUInstance instance = GetInstance();
+	Application app;
+	if (!app.Initialize()) {
+		return 1;
+	}
 
-	// Adapter setup
-	WGPUAdapter adapter = GetAdapter(instance);
-	SetAdapterLimits(adapter);
-	InspectAdapter(adapter);
+#ifdef __EMSCRIPTEN__
+	// Equivalent of the main loop when using Emscripten:
+	auto callback = [](void* arg) {
+		//                   ^^^ 2. We get the address of the app in the callback.
+		Application* pApp = reinterpret_cast<Application*>(arg);
+		//                  ^^^^^^^^^^^^^^^^ 3. We force this address to be interpreted
+		//                                      as a pointer to an Application object.
+		pApp->MainLoop(); // 4. We can use the application object
+		};
+	emscripten_set_main_loop_arg(callback, &app, 0, true);
+	//                                     ^^^^ 1. We pass the address of our application object.
+#else // __EMSCRIPTEN__
+	while (app.IsRunning()) {
+		app.MainLoop();
+	}
+#endif // __EMSCRIPTEN__
 
-	// Device setup
-	WGPUDevice device = GetDevice(instance, adapter);
 
-	// We no longer need to access the adapter once we have the device
-	wgpuAdapterRelease(adapter);
+	app.Terminate();
 
-
-	// Command queue
-	WGPUQueue queue = SetupCommandQueue(device);
-	WGPUCommandBuffer command = BuildCommandBuffer(device);
-	SubmitCommandQueue(instance, queue, command);
-
-
-	wgpuQueueRelease(queue);
-	wgpuDeviceRelease(device);
-
-	// We clean up the WebGPU instance
-	wgpuInstanceRelease(instance);
 
 	return 0;
 

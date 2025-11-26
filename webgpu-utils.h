@@ -40,7 +40,7 @@ WGPUAdapter requestAdapterSync(WGPUInstance instance, WGPURequestAdapterOptions 
 
 void SetAdapterLimits(const WGPUAdapter& adapter);
 
-WGPUAdapter GetAdapter(const WGPUInstance& instance);
+WGPUAdapter GetAdapter(const WGPUInstance& instance, const WGPUSurface& surface);
 
 void InspectAdapter(const WGPUAdapter& adapter);
 #pragma endregion
