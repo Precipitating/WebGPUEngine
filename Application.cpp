@@ -35,7 +35,8 @@ struct VertexOutput {
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput; // create the output struct
-    out.position = vec4f(in.position, 0.0, 1.0); // same as what we used to directly return
+	let ratio = 640.0 / 480.0; // The width and height of the target surface
+	out.position = vec4f(in.position.x, in.position.y * ratio, 0.0, 1.0);
     out.color = in.color; // forward the color attribute to the fragment shader
     return out;
 }
@@ -81,8 +82,8 @@ bool Application::Initialize()
 
 void Application::Terminate()
 {
-	wgpuBufferRelease(m_positionBuffer);
-	wgpuBufferRelease(m_colorBuffer);
+	wgpuBufferRelease(m_pointBuffer);
+	wgpuBufferRelease(m_indexBuffer);
 	wgpuBufferRelease(m_vertexBuffer);
 	wgpuRenderPipelineRelease(m_pipeline);
 	wgpuSurfaceUnconfigure(m_surface);
@@ -149,11 +150,12 @@ void Application::RenderPassEncoder(const WGPUTextureView& targetView)
 	WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDesc);
 	wgpuRenderPassEncoderSetPipeline(renderPass, m_pipeline);
 	// Set vertex buffers while encoding the render pass
-	wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, m_positionBuffer, 0, wgpuBufferGetSize(m_positionBuffer));
-	wgpuRenderPassEncoderSetVertexBuffer(renderPass, 1, m_colorBuffer, 0, wgpuBufferGetSize(m_colorBuffer));
+	wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, m_pointBuffer, 0, wgpuBufferGetSize(m_pointBuffer));
+	wgpuRenderPassEncoderSetIndexBuffer(renderPass, m_indexBuffer, WGPUIndexFormat_Uint16, 0, wgpuBufferGetSize(m_indexBuffer));
 
-	// We use the `m_vertexCount` variable instead of hard-coding the vertex count
-	wgpuRenderPassEncoderDraw(renderPass, m_vertexCount, 1, 0, 0);
+	// Replace `draw()` with `drawIndexed()` and `m_vertexCount` with `m_indexCount`
+// The extra argument is an offset within the index buffer.
+	wgpuRenderPassEncoderDrawIndexed(renderPass, m_indexCount, 1, 0, 0, 0);
 
 	wgpuRenderPassEncoderEnd(renderPass);
 	wgpuRenderPassEncoderRelease(renderPass);
@@ -295,110 +297,96 @@ WGPUAdapter Application::SetupAdapter()
 
 bool Application::InitializePipeline()
 {
+	// In Initialize() or in a dedicated InitializePipeline()
 	WGPUShaderSourceWGSL wgslDesc = WGPU_SHADER_SOURCE_WGSL_INIT;
 	wgslDesc.code = toWgpuStringView(shaderSource);
 	WGPUShaderModuleDescriptor shaderDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
 	shaderDesc.nextInChain = &wgslDesc.chain; // connect the chained extension
 	shaderDesc.label = toWgpuStringView("Shader source from Application.cpp");
 	WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(m_device, &shaderDesc);
-
-	// render pipeline descriptor
 	WGPURenderPipelineDescriptor pipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+	// Vertex fetch
+	WGPUVertexBufferLayout vertexBufferLayout = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
+	// We now have 2 attributes
+	std::vector<WGPUVertexAttribute> vertexAttribs(2);
+
+	// Describe the position attribute
+	vertexAttribs[0].shaderLocation = 0; // @location(0)
+	vertexAttribs[0].format = WGPUVertexFormat_Float32x2;
+	vertexAttribs[0].offset = 0;
+	// Describe the color attribute
+	vertexAttribs[1].shaderLocation = 1; // @location(1)
+	vertexAttribs[1].format = WGPUVertexFormat_Float32x3; // different type!
+	vertexAttribs[1].offset = 2 * sizeof(float); // non null offset!
+
+	vertexBufferLayout.attributeCount = static_cast<uint32_t>(vertexAttribs.size());
+	vertexBufferLayout.attributes = vertexAttribs.data();
+
+	vertexBufferLayout.arrayStride = 5 * sizeof(float);
+	//                               ^^^^^^^^^^^^^^^^^ The new stride
+	vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
+
+	// When describing the render pipeline:
+	pipelineDesc.vertex.bufferCount = 1;
+	pipelineDesc.vertex.buffers = &vertexBufferLayout;
 	pipelineDesc.vertex.module = shaderModule;
 	pipelineDesc.vertex.entryPoint = toWgpuStringView("vs_main");
-
-	// fragment state descriptor
 	WGPUFragmentState fragmentState = WGPU_FRAGMENT_STATE_INIT;
-
-
 	fragmentState.module = shaderModule;
 	fragmentState.entryPoint = toWgpuStringView("fs_main");
-
-	// color targets
 	WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
 	colorTarget.format = m_surfaceFormat;
-
-	// fragment blending
 	WGPUBlendState blendState = WGPU_BLEND_STATE_INIT;
 	colorTarget.blend = &blendState;
 	fragmentState.targetCount = 1;
-
 	fragmentState.targets = &colorTarget;
 	pipelineDesc.fragment = &fragmentState;
-
-	std::vector<WGPUVertexBufferLayout> vertexBufferLayouts(2);
-
-	// Position attribute
-	WGPUVertexAttribute positionAttrib;
-	positionAttrib.shaderLocation = 0; // @location(0)
-	positionAttrib.format = WGPUVertexFormat_Float32x2; // size of position
-	positionAttrib.offset = 0;
-	vertexBufferLayouts[0].attributeCount = 1;
-	vertexBufferLayouts[0].attributes = &positionAttrib;
-	vertexBufferLayouts[0].arrayStride = 2 * sizeof(float); // stride = size of position
-	vertexBufferLayouts[0].stepMode = WGPUVertexStepMode_Vertex;
-
-	// Color attribute
-	WGPUVertexAttribute colorAttrib;
-	colorAttrib.shaderLocation = 1; // @location(1)
-	colorAttrib.format = WGPUVertexFormat_Float32x3; // size of color
-	colorAttrib.offset = 0;
-
-	vertexBufferLayouts[1].attributeCount = 1;
-	vertexBufferLayouts[1].attributes = &colorAttrib;
-	vertexBufferLayouts[1].arrayStride = 3 * sizeof(float); // stride = size of color
-	vertexBufferLayouts[1].stepMode = WGPUVertexStepMode_Vertex;
-
-	pipelineDesc.vertex.bufferCount = static_cast<uint32_t>(vertexBufferLayouts.size());;
-	pipelineDesc.vertex.buffers = vertexBufferLayouts.data();
-
-
 	m_pipeline = wgpuDeviceCreateRenderPipeline(m_device, &pipelineDesc);
 	wgpuShaderModuleRelease(shaderModule);
-
 	return true;
 }
 
 bool Application::InitializeBuffers()
 {
-	// x0, y0, x1, y1, ...
-	std::vector<float> positionData = {
-		-0.45f,  0.5f,
-		 0.45f,  0.5f,
-		  0.0f, -0.5f,
-		 0.47f, 0.47f,
-		 0.25f,  0.0f,
-		 0.69f,  0.0f
+	std::vector<float> pointData = {
+		// x,   y,     r,   g,   b
+		-0.5, -0.5,   1.0, 0.0, 0.0,
+		+0.5, -0.5,   0.0, 1.0, 0.0,
+		+0.5, +0.5,   0.0, 0.0, 1.0,
+		-0.5, +0.5,   1.0, 1.0, 0.0
 	};
 
-	// r0,  g0,  b0, r1,  g1,  b1, ...
-	std::vector<float> colorData = {
-		1.0, 1.0, 0.0, // (yellow)
-		1.0, 0.0, 1.0, // (magenta)
-		0.0, 1.0, 1.0, // (cyan)
-		1.0, 0.0, 0.0, // (red)
-		0.0, 1.0, 0.0, // (green)
-		0.0, 0.0, 1.0  // (blue)
+	// Define index data
+	// This is a list of indices referencing positions in the pointData
+	std::vector<uint16_t> indexData = {
+		0, 1, 2, // Triangle #0 connects points #0, #1 and #2
+		0, 2, 3  // Triangle #1 connects points #0, #2 and #3
 	};
 
-	m_vertexCount = static_cast<uint32_t>(positionData.size() / 2);
-	assert(m_vertexCount == static_cast<uint32_t>(colorData.size() / 3));
+	// We now store the index count rather than the vertex count
+	m_indexCount = static_cast<uint32_t>(indexData.size());
 
-	// Create vertex buffers
-	WGPUBufferDescriptor bufferDesc;
-	bufferDesc.nextInChain = nullptr;
+	// Create point buffers
+	WGPUBufferDescriptor bufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+	bufferDesc.size = pointData.size() * sizeof(float);
 	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
-	bufferDesc.mappedAtCreation = false;
+	m_pointBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
 
-	bufferDesc.label = toWgpuStringView("Vertex Position");
-	bufferDesc.size = positionData.size() * sizeof(float);
-	m_positionBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
-	wgpuQueueWriteBuffer(m_queue, m_positionBuffer, 0, positionData.data(), bufferDesc.size);
-
-	bufferDesc.label = toWgpuStringView("Vertex Color");
-	bufferDesc.size = colorData.size() * sizeof(float);
-	m_colorBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
-	wgpuQueueWriteBuffer(m_queue, m_colorBuffer, 0, colorData.data(), bufferDesc.size);
+	wgpuQueueWriteBuffer(m_queue, m_pointBuffer, 0, pointData.data(), bufferDesc.size);
+	// It is not easy with the auto-generation of code to remove the previously
+	// defined `vertexBuffer` attribute, but at the same time some compilers
+	// (rightfully) complain if we do not use it. This is a hack to mark the
+	// variable as used and have automated build tests pass.
 	(void)m_vertexBuffer;
+	(void)m_vertexCount;
+
+	bufferDesc.size = indexData.size() * sizeof(uint16_t);
+	bufferDesc.size = (bufferDesc.size + 3) & ~3; // round up to the next multiple of 4
+	indexData.resize((indexData.size() + 1) & ~1); // round up to the next multiple of 2
+	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Index;;
+	m_indexBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
+
+	wgpuQueueWriteBuffer(m_queue, m_indexBuffer, 0, indexData.data(), bufferDesc.size);
+	// Create index buffer
 	return true;
 }

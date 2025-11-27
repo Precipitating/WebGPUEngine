@@ -43,11 +43,12 @@ private:
     WGPURenderPipeline m_pipeline = nullptr;
     WGPUTextureFormat m_surfaceFormat = WGPUTextureFormat_Undefined;
 
-    WGPUBuffer m_vertexBuffer;
+    WGPUBuffer m_vertexBuffer = nullptr;
     uint32_t m_vertexCount = 0;
 
-    WGPUBuffer m_positionBuffer = nullptr;
-    WGPUBuffer m_colorBuffer = nullptr;
+    WGPUBuffer m_pointBuffer = nullptr;
+    WGPUBuffer m_indexBuffer = nullptr;
+    uint32_t m_indexCount = 0;
 
 
 
