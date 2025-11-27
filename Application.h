@@ -30,6 +30,7 @@ private:
     void SetupDevice(const WGPUAdapter& adapter);
     WGPUAdapter SetupAdapter();
     bool InitializePipeline();
+    bool InitializeBuffers();
 
 private:
     GLFWwindow* m_window = nullptr;
@@ -39,6 +40,8 @@ private:
     WGPUSurface m_surface = nullptr;
     WGPURenderPipeline m_pipeline = nullptr;
     WGPUTextureFormat m_surfaceFormat = WGPUTextureFormat_Undefined;
+    uint32_t m_vertexCount = 0;
+    WGPUBuffer m_vertexBuffer;
 
 };
 

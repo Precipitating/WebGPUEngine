@@ -12,14 +12,8 @@
 
 const char* shaderSource = R"(
 @vertex
-fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {
-	if (in_vertex_index == 0u) {
-		return vec4f(-0.45, 0.5, 0.0, 1.0);
-	} else if (in_vertex_index == 1u) {
-		return vec4f(0.45, 0.5, 0.0, 1.0);
-	} else {
-		return vec4f(0.0, -0.5, 0.0, 1.0);
-	}
+fn vs_main(@location(0) in_vertex_position: vec2f) -> @builtin(position) vec4f {
+    return vec4f(in_vertex_position, 0.0, 1.0);
 }
 // Add this in the same shaderSource literal than the vertex entry point
 @fragment
@@ -57,7 +51,7 @@ bool Application::Initialize()
 
 	// At the end of Initialize()
 	if (!InitializePipeline()) return false;
-
+	if (!InitializeBuffers()) return false;
 	return true;
 }
 
@@ -70,6 +64,9 @@ void Application::Terminate()
 	glfwDestroyWindow(m_window);
 	glfwTerminate();
 	wgpuRenderPipelineRelease(m_pipeline);
+	wgpuBufferRelease(m_vertexBuffer);
+
+
 }
 
 
@@ -126,8 +123,9 @@ void Application::RenderPassEncoder(const WGPUTextureView& targetView)
 	// render pass encoder
 	WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDesc);
 	wgpuRenderPassEncoderSetPipeline(renderPass, m_pipeline);
-	// Draw 1 instance of a 3-vertices shape
-	wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
+	wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, m_vertexBuffer, 0, wgpuBufferGetSize(m_vertexBuffer));
+	// We use the `m_vertexCount` variable instead of hard-coding the vertex count
+	wgpuRenderPassEncoderDraw(renderPass, m_vertexCount, 1, 0, 0);
 
 	wgpuRenderPassEncoderEnd(renderPass);
 	wgpuRenderPassEncoderRelease(renderPass);
@@ -300,10 +298,67 @@ bool Application::InitializePipeline()
 	fragmentState.targets = &colorTarget;
 	pipelineDesc.fragment = &fragmentState;
 
+	WGPUVertexBufferLayout vertexBufferLayout = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
+	WGPUVertexAttribute positionAttrib = WGPU_VERTEX_ATTRIBUTE_INIT;
+	// == For each attribute, describe its layout, i.e., how to interpret the raw data ==
+	// Corresponds to @location(...)
+	positionAttrib.shaderLocation = 0;
+	// Means vec2f in the shader
+	positionAttrib.format = WGPUVertexFormat_Float32x2;
+	// Index of the first element
+	positionAttrib.offset = 0;
+
+	vertexBufferLayout.attributeCount = 1;
+	vertexBufferLayout.attributes = &positionAttrib;
+	// == Common to attributes from the same buffer ==
+	vertexBufferLayout.arrayStride = 2 * sizeof(float);
+	vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
+
+
+	pipelineDesc.vertex.bufferCount = 1;
+	pipelineDesc.vertex.buffers = &vertexBufferLayout;
 
 
 	m_pipeline = wgpuDeviceCreateRenderPipeline(m_device, &pipelineDesc);
 	wgpuShaderModuleRelease(shaderModule);
+
+	return true;
+}
+
+bool Application::InitializeBuffers()
+{
+	// Vertex buffer data
+	// There are 2 floats per vertex, one for x and one for y.
+	// But in the end this is just a bunch of floats to the eyes of the GPU,
+	// the *layout* will tell how to interpret this.
+	std::vector<float> vertexData = {
+		// Define a first triangle: 
+		-0.45f, 0.5f,
+		0.45f, 0.5f,
+		0.0f, -0.5f,
+
+		//// Add a second triangle:
+		0.47f, 0.47f,
+		0.25f, 0.0f,
+		0.69f, 0.0f,
+
+
+
+	};
+
+	// We will declare vertexCount as a member of the Application class
+	m_vertexCount = static_cast<uint32_t>(vertexData.size() / 2);
+
+	// Create vertex buffer
+	WGPUBufferDescriptor bufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+	bufferDesc.size = vertexData.size() * sizeof(float);
+	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex; // Vertex usage here!
+	m_vertexBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
+
+	// Upload geometry data to the buffer
+	wgpuQueueWriteBuffer(m_queue, m_vertexBuffer, 0, vertexData.data(), bufferDesc.size);
+
+
 
 	return true;
 }
