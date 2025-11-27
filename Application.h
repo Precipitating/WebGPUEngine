@@ -29,6 +29,7 @@ private:
     void RenderPassEncoder(const WGPUTextureView& targetView);
     void SetupDevice(const WGPUAdapter& adapter);
     WGPUAdapter SetupAdapter();
+    bool InitializePipeline();
 
 private:
     GLFWwindow* m_window = nullptr;
@@ -36,6 +37,8 @@ private:
     WGPUDevice m_device = nullptr;
     WGPUQueue m_queue = nullptr;
     WGPUSurface m_surface = nullptr;
+    WGPURenderPipeline m_pipeline = nullptr;
+    WGPUTextureFormat m_surfaceFormat = WGPUTextureFormat_Undefined;
 
 };
 

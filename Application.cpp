@@ -10,6 +10,24 @@
 #include <glfw3webgpu.h>
 
 
+const char* shaderSource = R"(
+@vertex
+fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {
+	if (in_vertex_index == 0u) {
+		return vec4f(-0.45, 0.5, 0.0, 1.0);
+	} else if (in_vertex_index == 1u) {
+		return vec4f(0.45, 0.5, 0.0, 1.0);
+	} else {
+		return vec4f(0.0, -0.5, 0.0, 1.0);
+	}
+}
+// Add this in the same shaderSource literal than the vertex entry point
+@fragment
+fn fs_main() -> @location(0) vec4f {
+	return vec4f(0.0, 0.4, 0.7, 1.0);
+}
+)";
+
 bool Application::Initialize()
 {
 	glfwInit();
@@ -34,9 +52,11 @@ bool Application::Initialize()
 	// Surface setup
 	SetupSurfaceConfig(adapter);
 
-
 	// We no longer need to access the adapter once we have the device
 	wgpuAdapterRelease(adapter);
+
+	// At the end of Initialize()
+	if (!InitializePipeline()) return false;
 
 	return true;
 }
@@ -49,6 +69,7 @@ void Application::Terminate()
 	wgpuDeviceRelease(m_device);
 	glfwDestroyWindow(m_window);
 	glfwTerminate();
+	wgpuRenderPipelineRelease(m_pipeline);
 }
 
 
@@ -81,6 +102,8 @@ WGPUTextureView Application::GetNextSurfaceView()
 
 }
 
+
+
 void Application::RenderPassEncoder(const WGPUTextureView& targetView)
 {
 	// - encoder descriptor
@@ -102,6 +125,10 @@ void Application::RenderPassEncoder(const WGPUTextureView& targetView)
 
 	// render pass encoder
 	WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDesc);
+	wgpuRenderPassEncoderSetPipeline(renderPass, m_pipeline);
+	// Draw 1 instance of a 3-vertices shape
+	wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
+
 	wgpuRenderPassEncoderEnd(renderPass);
 	wgpuRenderPassEncoderRelease(renderPass);
 
@@ -131,6 +158,7 @@ void Application::MainLoop()
 
 
 	RenderPassEncoder(targetView);
+
 
 	// At the end of the frame
 	wgpuTextureViewRelease(targetView);
@@ -167,6 +195,8 @@ bool Application::SetupSurfaceConfig(const WGPUAdapter& adapter)
 	config.alphaMode = WGPUCompositeAlphaMode_Auto;
 
 	wgpuSurfaceConfigure(m_surface, &config);
+
+	m_surfaceFormat = config.format;
 
 	return true;
 
@@ -235,4 +265,45 @@ WGPUAdapter Application::SetupAdapter()
 
 	return adapter;
 
+}
+
+bool Application::InitializePipeline()
+{
+	WGPUShaderSourceWGSL wgslDesc = WGPU_SHADER_SOURCE_WGSL_INIT;
+	wgslDesc.code = toWgpuStringView(shaderSource);
+	WGPUShaderModuleDescriptor shaderDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+	shaderDesc.nextInChain = &wgslDesc.chain; // connect the chained extension
+	shaderDesc.label = toWgpuStringView("Shader source from Application.cpp");
+	WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(m_device, &shaderDesc);
+
+	// render pipeline descriptor
+	WGPURenderPipelineDescriptor pipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+	pipelineDesc.vertex.module = shaderModule;
+	pipelineDesc.vertex.entryPoint = toWgpuStringView("vs_main");
+
+	// fragment state descriptor
+	WGPUFragmentState fragmentState = WGPU_FRAGMENT_STATE_INIT;
+
+
+	fragmentState.module = shaderModule;
+	fragmentState.entryPoint = toWgpuStringView("fs_main");
+
+	// color targets
+	WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+	colorTarget.format = m_surfaceFormat;
+
+	// fragment blending
+	WGPUBlendState blendState = WGPU_BLEND_STATE_INIT;
+	colorTarget.blend = &blendState;
+	fragmentState.targetCount = 1;
+
+	fragmentState.targets = &colorTarget;
+	pipelineDesc.fragment = &fragmentState;
+
+
+
+	m_pipeline = wgpuDeviceCreateRenderPipeline(m_device, &pipelineDesc);
+	wgpuShaderModuleRelease(shaderModule);
+
+	return true;
 }
