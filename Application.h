@@ -34,14 +34,22 @@ private:
 
 private:
     GLFWwindow* m_window = nullptr;
+
     WGPUInstance m_instance = nullptr;
     WGPUDevice m_device = nullptr;
     WGPUQueue m_queue = nullptr;
+
     WGPUSurface m_surface = nullptr;
     WGPURenderPipeline m_pipeline = nullptr;
     WGPUTextureFormat m_surfaceFormat = WGPUTextureFormat_Undefined;
-    uint32_t m_vertexCount = 0;
+
     WGPUBuffer m_vertexBuffer;
+    uint32_t m_vertexCount = 0;
+
+    WGPUBuffer m_positionBuffer = nullptr;
+    WGPUBuffer m_colorBuffer = nullptr;
+
+
 
 };
 

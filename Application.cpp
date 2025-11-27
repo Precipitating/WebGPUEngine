@@ -3,7 +3,7 @@
 #include "webgpu-utils.h"
 
 #include <GLFW/glfw3.h>
-
+#include <cassert>
 #include <iostream>
 #include <vector>
 // In Application.cpp
@@ -11,14 +11,38 @@
 
 
 const char* shaderSource = R"(
+/**
+ * A structure with fields labeled with vertex attribute locations can be used
+ * as input to the entry point of a shader.
+ */
+struct VertexInput {
+	@location(0) position: vec2f,
+	@location(1) color: vec3f,
+};
+/**
+ * A structure with fields labeled with builtins and locations can also be used
+ * as *output* of the vertex shader, which is also the input of the fragment
+ * shader.
+ */
+struct VertexOutput {
+	@builtin(position) position: vec4f,
+	// The location here does not refer to a vertex attribute, it just means
+	// that this field must be handled by the rasterizer.
+	// (It can also refer to another field of another struct that would be used
+	// as input to the fragment shader.)
+	@location(0) color: vec3f,
+};
 @vertex
-fn vs_main(@location(0) in_vertex_position: vec2f) -> @builtin(position) vec4f {
-    return vec4f(in_vertex_position, 0.0, 1.0);
+fn vs_main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput; // create the output struct
+    out.position = vec4f(in.position, 0.0, 1.0); // same as what we used to directly return
+    out.color = in.color; // forward the color attribute to the fragment shader
+    return out;
 }
 // Add this in the same shaderSource literal than the vertex entry point
 @fragment
-fn fs_main() -> @location(0) vec4f {
-	return vec4f(0.0, 0.4, 0.7, 1.0);
+fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+	return vec4f(in.color, 1.0); // use the interpolated color coming from the vertex shader
 }
 )";
 
@@ -57,15 +81,16 @@ bool Application::Initialize()
 
 void Application::Terminate()
 {
+	wgpuBufferRelease(m_positionBuffer);
+	wgpuBufferRelease(m_colorBuffer);
+	wgpuBufferRelease(m_vertexBuffer);
+	wgpuRenderPipelineRelease(m_pipeline);
 	wgpuSurfaceUnconfigure(m_surface);
 	wgpuQueueRelease(m_queue);
 	wgpuSurfaceRelease(m_surface);
 	wgpuDeviceRelease(m_device);
 	glfwDestroyWindow(m_window);
 	glfwTerminate();
-	wgpuRenderPipelineRelease(m_pipeline);
-	wgpuBufferRelease(m_vertexBuffer);
-
 
 }
 
@@ -123,7 +148,10 @@ void Application::RenderPassEncoder(const WGPUTextureView& targetView)
 	// render pass encoder
 	WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDesc);
 	wgpuRenderPassEncoderSetPipeline(renderPass, m_pipeline);
-	wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, m_vertexBuffer, 0, wgpuBufferGetSize(m_vertexBuffer));
+	// Set vertex buffers while encoding the render pass
+	wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, m_positionBuffer, 0, wgpuBufferGetSize(m_positionBuffer));
+	wgpuRenderPassEncoderSetVertexBuffer(renderPass, 1, m_colorBuffer, 0, wgpuBufferGetSize(m_colorBuffer));
+
 	// We use the `m_vertexCount` variable instead of hard-coding the vertex count
 	wgpuRenderPassEncoderDraw(renderPass, m_vertexCount, 1, 0, 0);
 
@@ -298,25 +326,31 @@ bool Application::InitializePipeline()
 	fragmentState.targets = &colorTarget;
 	pipelineDesc.fragment = &fragmentState;
 
-	WGPUVertexBufferLayout vertexBufferLayout = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
-	WGPUVertexAttribute positionAttrib = WGPU_VERTEX_ATTRIBUTE_INIT;
-	// == For each attribute, describe its layout, i.e., how to interpret the raw data ==
-	// Corresponds to @location(...)
-	positionAttrib.shaderLocation = 0;
-	// Means vec2f in the shader
-	positionAttrib.format = WGPUVertexFormat_Float32x2;
-	// Index of the first element
+	std::vector<WGPUVertexBufferLayout> vertexBufferLayouts(2);
+
+	// Position attribute
+	WGPUVertexAttribute positionAttrib;
+	positionAttrib.shaderLocation = 0; // @location(0)
+	positionAttrib.format = WGPUVertexFormat_Float32x2; // size of position
 	positionAttrib.offset = 0;
+	vertexBufferLayouts[0].attributeCount = 1;
+	vertexBufferLayouts[0].attributes = &positionAttrib;
+	vertexBufferLayouts[0].arrayStride = 2 * sizeof(float); // stride = size of position
+	vertexBufferLayouts[0].stepMode = WGPUVertexStepMode_Vertex;
 
-	vertexBufferLayout.attributeCount = 1;
-	vertexBufferLayout.attributes = &positionAttrib;
-	// == Common to attributes from the same buffer ==
-	vertexBufferLayout.arrayStride = 2 * sizeof(float);
-	vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
+	// Color attribute
+	WGPUVertexAttribute colorAttrib;
+	colorAttrib.shaderLocation = 1; // @location(1)
+	colorAttrib.format = WGPUVertexFormat_Float32x3; // size of color
+	colorAttrib.offset = 0;
 
+	vertexBufferLayouts[1].attributeCount = 1;
+	vertexBufferLayouts[1].attributes = &colorAttrib;
+	vertexBufferLayouts[1].arrayStride = 3 * sizeof(float); // stride = size of color
+	vertexBufferLayouts[1].stepMode = WGPUVertexStepMode_Vertex;
 
-	pipelineDesc.vertex.bufferCount = 1;
-	pipelineDesc.vertex.buffers = &vertexBufferLayout;
+	pipelineDesc.vertex.bufferCount = static_cast<uint32_t>(vertexBufferLayouts.size());;
+	pipelineDesc.vertex.buffers = vertexBufferLayouts.data();
 
 
 	m_pipeline = wgpuDeviceCreateRenderPipeline(m_device, &pipelineDesc);
@@ -327,38 +361,44 @@ bool Application::InitializePipeline()
 
 bool Application::InitializeBuffers()
 {
-	// Vertex buffer data
-	// There are 2 floats per vertex, one for x and one for y.
-	// But in the end this is just a bunch of floats to the eyes of the GPU,
-	// the *layout* will tell how to interpret this.
-	std::vector<float> vertexData = {
-		// Define a first triangle: 
-		-0.45f, 0.5f,
-		0.45f, 0.5f,
-		0.0f, -0.5f,
-
-		//// Add a second triangle:
-		0.47f, 0.47f,
-		0.25f, 0.0f,
-		0.69f, 0.0f,
-
-
-
+	// x0, y0, x1, y1, ...
+	std::vector<float> positionData = {
+		-0.45f,  0.5f,
+		 0.45f,  0.5f,
+		  0.0f, -0.5f,
+		 0.47f, 0.47f,
+		 0.25f,  0.0f,
+		 0.69f,  0.0f
 	};
 
-	// We will declare vertexCount as a member of the Application class
-	m_vertexCount = static_cast<uint32_t>(vertexData.size() / 2);
+	// r0,  g0,  b0, r1,  g1,  b1, ...
+	std::vector<float> colorData = {
+		1.0, 1.0, 0.0, // (yellow)
+		1.0, 0.0, 1.0, // (magenta)
+		0.0, 1.0, 1.0, // (cyan)
+		1.0, 0.0, 0.0, // (red)
+		0.0, 1.0, 0.0, // (green)
+		0.0, 0.0, 1.0  // (blue)
+	};
 
-	// Create vertex buffer
-	WGPUBufferDescriptor bufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
-	bufferDesc.size = vertexData.size() * sizeof(float);
-	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex; // Vertex usage here!
-	m_vertexBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
+	m_vertexCount = static_cast<uint32_t>(positionData.size() / 2);
+	assert(m_vertexCount == static_cast<uint32_t>(colorData.size() / 3));
 
-	// Upload geometry data to the buffer
-	wgpuQueueWriteBuffer(m_queue, m_vertexBuffer, 0, vertexData.data(), bufferDesc.size);
+	// Create vertex buffers
+	WGPUBufferDescriptor bufferDesc;
+	bufferDesc.nextInChain = nullptr;
+	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
+	bufferDesc.mappedAtCreation = false;
 
+	bufferDesc.label = toWgpuStringView("Vertex Position");
+	bufferDesc.size = positionData.size() * sizeof(float);
+	m_positionBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
+	wgpuQueueWriteBuffer(m_queue, m_positionBuffer, 0, positionData.data(), bufferDesc.size);
 
-
+	bufferDesc.label = toWgpuStringView("Vertex Color");
+	bufferDesc.size = colorData.size() * sizeof(float);
+	m_colorBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
+	wgpuQueueWriteBuffer(m_queue, m_colorBuffer, 0, colorData.data(), bufferDesc.size);
+	(void)m_vertexBuffer;
 	return true;
 }
