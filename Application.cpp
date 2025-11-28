@@ -6,46 +6,9 @@
 #include <cassert>
 #include <iostream>
 #include <vector>
+#include "ResourceManager.h"
 // In Application.cpp
 #include <glfw3webgpu.h>
-
-
-const char* shaderSource = R"(
-/**
- * A structure with fields labeled with vertex attribute locations can be used
- * as input to the entry point of a shader.
- */
-struct VertexInput {
-	@location(0) position: vec2f,
-	@location(1) color: vec3f,
-};
-/**
- * A structure with fields labeled with builtins and locations can also be used
- * as *output* of the vertex shader, which is also the input of the fragment
- * shader.
- */
-struct VertexOutput {
-	@builtin(position) position: vec4f,
-	// The location here does not refer to a vertex attribute, it just means
-	// that this field must be handled by the rasterizer.
-	// (It can also refer to another field of another struct that would be used
-	// as input to the fragment shader.)
-	@location(0) color: vec3f,
-};
-@vertex
-fn vs_main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput; // create the output struct
-	let ratio = 640.0 / 480.0; // The width and height of the target surface
-	out.position = vec4f(in.position.x, in.position.y * ratio, 0.0, 1.0);
-    out.color = in.color; // forward the color attribute to the fragment shader
-    return out;
-}
-// Add this in the same shaderSource literal than the vertex entry point
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-	return vec4f(in.color, 1.0); // use the interpolated color coming from the vertex shader
-}
-)";
 
 bool Application::Initialize()
 {
@@ -299,11 +262,10 @@ bool Application::InitializePipeline()
 {
 	// In Initialize() or in a dedicated InitializePipeline()
 	WGPUShaderSourceWGSL wgslDesc = WGPU_SHADER_SOURCE_WGSL_INIT;
-	wgslDesc.code = toWgpuStringView(shaderSource);
-	WGPUShaderModuleDescriptor shaderDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
-	shaderDesc.nextInChain = &wgslDesc.chain; // connect the chained extension
-	shaderDesc.label = toWgpuStringView("Shader source from Application.cpp");
-	WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(m_device, &shaderDesc);
+	std::cout << "Creating shader module..." << std::endl;
+	WGPUShaderModule shaderModule = ResourceManager::loadShaderModule(RESOURCE_DIR "/shader.wgsl", m_device);
+	if (shaderModule == nullptr) return false;
+
 	WGPURenderPipelineDescriptor pipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
 	// Vertex fetch
 	WGPUVertexBufferLayout vertexBufferLayout = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
@@ -348,22 +310,12 @@ bool Application::InitializePipeline()
 
 bool Application::InitializeBuffers()
 {
-	std::vector<float> pointData = {
-		// x,   y,     r,   g,   b
-		-0.5, -0.5,   1.0, 0.0, 0.0,
-		+0.5, -0.5,   0.0, 1.0, 0.0,
-		+0.5, +0.5,   0.0, 0.0, 1.0,
-		-0.5, +0.5,   1.0, 1.0, 0.0
-	};
+	std::vector<float> pointData;
+	std::vector<uint16_t> indexData;
 
-	// Define index data
-	// This is a list of indices referencing positions in the pointData
-	std::vector<uint16_t> indexData = {
-		0, 1, 2, // Triangle #0 connects points #0, #1 and #2
-		0, 2, 3  // Triangle #1 connects points #0, #2 and #3
-	};
+	bool success = ResourceManager::loadGeometry(RESOURCE_DIR "/webgpu.txt", pointData, indexData);
+	if (!success) return false;
 
-	// We now store the index count rather than the vertex count
 	m_indexCount = static_cast<uint32_t>(indexData.size());
 
 	// Create point buffers
