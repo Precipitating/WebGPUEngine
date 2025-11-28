@@ -1,7 +1,6 @@
 #include <webgpu/webgpu.h>
-
+#include <array>
 struct GLFWwindow;
-
 
 class Application
 {
@@ -19,9 +18,6 @@ public:
 
     // Return true as long as the main loop should keep on running
     bool IsRunning();
-
-
-
 
 
 private:
@@ -56,6 +52,19 @@ private:
     WGPUPipelineLayout m_layout = nullptr;
     WGPUBindGroupLayout m_bindGroupLayout = nullptr;
     WGPUBindGroup m_bindGroup = nullptr;
+
+
+private:
+    struct MyUniforms
+    {
+        std::array<float, 4> color;  // or float color[4]
+        float time;
+        // align on a multiple of 16, as the total size must be a multiple of the alignment size of its largest field.
+        // this padding makes it 32
+        float _pad[3];
+    };
+
+    static_assert(sizeof(MyUniforms) % 16 == 0);
 
 
 

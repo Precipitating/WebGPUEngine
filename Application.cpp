@@ -153,8 +153,9 @@ void Application::MainLoop()
 	glfwPollEvents();
 	wgpuInstanceProcessEvents(m_instance);
 
-	float t = static_cast<float>(glfwGetTime()); // glfwGetTime returns a double
-	wgpuQueueWriteBuffer(m_queue, m_uniformBuffer, 0, &t, sizeof(float));
+	float time = static_cast<float>(glfwGetTime());
+	// Only update the 1-st float of the buffer
+	wgpuQueueWriteBuffer(m_queue, m_uniformBuffer, offsetof(MyUniforms, time), &time, sizeof(time));
 
 	// Get the next target texture view
 	WGPUTextureView targetView = GetNextSurfaceView();
@@ -326,9 +327,9 @@ bool Application::InitializePipeline()
 	WGPUBindGroupLayoutEntry bindingLayout = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
 	// The binding index as used in the @binding attribute in the shader
 	bindingLayout.binding = 0;
-	bindingLayout.visibility = WGPUShaderStage_Vertex;
+	bindingLayout.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
 	bindingLayout.buffer.type = WGPUBufferBindingType_Uniform;
-	bindingLayout.buffer.minBindingSize = 4 * sizeof(float);
+	bindingLayout.buffer.minBindingSize = sizeof(MyUniforms);
 
 	// Create a bind group layout
 	WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
@@ -392,22 +393,21 @@ bool Application::InitializeBuffers()
 	m_indexBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
 
 
+	wgpuQueueWriteBuffer(m_queue, m_indexBuffer, 0, indexData.data(), bufferDesc.size);
+
+
 	// 3. Create and fill uniform buffer
 	// Create uniform buffer (reusing bufferDesc from other buffer creations)
 	// The buffer will only contain 1 float with the value of uTime
 	// then 3 floats left empty but needed by alignment constraints
-	bufferDesc.size = 4 * sizeof(float);
-
-	// Make sure to flag the buffer as BufferUsage::Uniform
+	bufferDesc.size = sizeof(MyUniforms);
 	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
-
 	m_uniformBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
+	MyUniforms uniforms;
+	uniforms.time = 1.0f;
+	uniforms.color = { 0.0f, 1.0f, 0.4f, 1.0f };
+	wgpuQueueWriteBuffer(m_queue, m_uniformBuffer, 0, &uniforms, sizeof(uniforms));
 
-	float currentTime = 1.0f;
-	wgpuQueueWriteBuffer(m_queue, m_uniformBuffer, 0, &currentTime, sizeof(float));
-
-	wgpuQueueWriteBuffer(m_queue, m_indexBuffer, 0, indexData.data(), bufferDesc.size);
-	// Create index buffer
 	return true;
 }
 void Application::InitializeBindGroups()
@@ -423,7 +423,7 @@ void Application::InitializeBindGroups()
 	// multiple uniform blocks.
 	binding.offset = 0;
 	// And we specify again the size of the buffer.
-	binding.size = 4 * sizeof(float);
+	binding.size = sizeof(MyUniforms);
 
 	// A bind group contains one or multiple bindings
 	WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
