@@ -53,6 +53,8 @@ private:
     WGPUBindGroupLayout m_bindGroupLayout = nullptr;
     WGPUBindGroup m_bindGroup = nullptr;
 
+    uint32_t m_uniformStride = 0;
+
 
 private:
     struct MyUniforms

@@ -49,6 +49,10 @@ bool Application::Initialize()
 
 void Application::Terminate()
 {
+	wgpuBindGroupRelease(m_bindGroup);
+	wgpuPipelineLayoutRelease(m_layout);
+	wgpuBindGroupLayoutRelease(m_bindGroupLayout);
+	wgpuBufferRelease(m_uniformBuffer);
 	wgpuBufferRelease(m_pointBuffer);
 	wgpuBufferRelease(m_indexBuffer);
 	wgpuBufferRelease(m_vertexBuffer);
@@ -57,9 +61,6 @@ void Application::Terminate()
 	wgpuQueueRelease(m_queue);
 	wgpuSurfaceRelease(m_surface);
 	wgpuDeviceRelease(m_device);
-	wgpuBufferRelease(m_uniformBuffer);
-	wgpuPipelineLayoutRelease(m_layout);
-	wgpuBindGroupLayoutRelease(m_bindGroupLayout);
 	glfwDestroyWindow(m_window);
 	glfwTerminate();
 
@@ -123,11 +124,18 @@ void Application::RenderPassEncoder(const WGPUTextureView& targetView)
 	wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, m_pointBuffer, 0, wgpuBufferGetSize(m_pointBuffer));
 	wgpuRenderPassEncoderSetIndexBuffer(renderPass, m_indexBuffer, WGPUIndexFormat_Uint16, 0, wgpuBufferGetSize(m_indexBuffer));
 
-	wgpuRenderPassEncoderSetBindGroup(renderPass, 0, m_bindGroup, 0, nullptr);
+	uint32_t dynamicOffset = 0;
 
-	// Replace `draw()` with `drawIndexed()` and `m_vertexCount` with `m_indexCount`
-	// The extra argument is an offset within the index buffer.
+	// Set binding group
+	dynamicOffset = 0 * m_uniformStride;
+	wgpuRenderPassEncoderSetBindGroup(renderPass, 0, m_bindGroup, 1, &dynamicOffset);
 	wgpuRenderPassEncoderDrawIndexed(renderPass, m_indexCount, 1, 0, 0, 0);
+
+	dynamicOffset = 1 * m_uniformStride;
+	wgpuRenderPassEncoderSetBindGroup(renderPass, 0, m_bindGroup, 1, &dynamicOffset);
+	wgpuRenderPassEncoderDrawIndexed(renderPass, m_indexCount, 1, 0, 0, 0);
+
+
 
 	wgpuRenderPassEncoderEnd(renderPass);
 	wgpuRenderPassEncoderRelease(renderPass);
@@ -327,9 +335,12 @@ bool Application::InitializePipeline()
 	WGPUBindGroupLayoutEntry bindingLayout = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
 	// The binding index as used in the @binding attribute in the shader
 	bindingLayout.binding = 0;
-	bindingLayout.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
+
 	bindingLayout.buffer.type = WGPUBufferBindingType_Uniform;
 	bindingLayout.buffer.minBindingSize = sizeof(MyUniforms);
+	bindingLayout.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
+
+	bindingLayout.buffer.hasDynamicOffset = true;
 
 	// Create a bind group layout
 	WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
@@ -395,18 +406,35 @@ bool Application::InitializeBuffers()
 
 	wgpuQueueWriteBuffer(m_queue, m_indexBuffer, 0, indexData.data(), bufferDesc.size);
 
-
 	// 3. Create and fill uniform buffer
 	// Create uniform buffer (reusing bufferDesc from other buffer creations)
 	// The buffer will only contain 1 float with the value of uTime
 	// then 3 floats left empty but needed by alignment constraints
-	bufferDesc.size = sizeof(MyUniforms);
+
+	WGPULimits deviceLimits = WGPU_LIMITS_INIT;
+	wgpuDeviceGetLimits(m_device, &deviceLimits);
+
+	// Subtlety
+	m_uniformStride = ceilToNextMultiple(
+		(uint32_t)sizeof(MyUniforms),
+		(uint32_t)deviceLimits.minUniformBufferOffsetAlignment
+	);
+
+	bufferDesc.size = m_uniformStride + sizeof(MyUniforms);
 	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
 	m_uniformBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
+
 	MyUniforms uniforms;
+
+	// Upload first value
 	uniforms.time = 1.0f;
 	uniforms.color = { 0.0f, 1.0f, 0.4f, 1.0f };
 	wgpuQueueWriteBuffer(m_queue, m_uniformBuffer, 0, &uniforms, sizeof(uniforms));
+
+	// Upload second value
+	uniforms.time = -1.0f;
+	uniforms.color = { 1.0f, 1.0f, 1.0f, 0.7f };
+	wgpuQueueWriteBuffer(m_queue, m_uniformBuffer, m_uniformStride, &uniforms, sizeof(uniforms));   
 
 	return true;
 }

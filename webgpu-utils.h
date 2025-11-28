@@ -56,6 +56,8 @@ void InspectAdapter(const WGPUAdapter& adapter);
  */
 WGPUDevice requestDeviceSync(WGPUInstance instance, WGPUAdapter adapter, WGPUDeviceDescriptor const* descriptor);
 
+uint32_t ceilToNextMultiple(uint32_t value, uint32_t step);
+
 
 WGPUDevice GetDevice(WGPUInstance& instance, WGPUAdapter& adapter);
 
