@@ -37,9 +37,13 @@ bool Application::Initialize()
 	// We no longer need to access the adapter once we have the device
 	wgpuAdapterRelease(adapter);
 
+
+
 	// At the end of Initialize()
 	if (!InitializePipeline()) return false;
 	if (!InitializeBuffers()) return false;
+
+	InitializeBindGroups();
 	return true;
 }
 
@@ -53,6 +57,9 @@ void Application::Terminate()
 	wgpuQueueRelease(m_queue);
 	wgpuSurfaceRelease(m_surface);
 	wgpuDeviceRelease(m_device);
+	wgpuBufferRelease(m_uniformBuffer);
+	wgpuPipelineLayoutRelease(m_layout);
+	wgpuBindGroupLayoutRelease(m_bindGroupLayout);
 	glfwDestroyWindow(m_window);
 	glfwTerminate();
 
@@ -116,8 +123,10 @@ void Application::RenderPassEncoder(const WGPUTextureView& targetView)
 	wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, m_pointBuffer, 0, wgpuBufferGetSize(m_pointBuffer));
 	wgpuRenderPassEncoderSetIndexBuffer(renderPass, m_indexBuffer, WGPUIndexFormat_Uint16, 0, wgpuBufferGetSize(m_indexBuffer));
 
+	wgpuRenderPassEncoderSetBindGroup(renderPass, 0, m_bindGroup, 0, nullptr);
+
 	// Replace `draw()` with `drawIndexed()` and `m_vertexCount` with `m_indexCount`
-// The extra argument is an offset within the index buffer.
+	// The extra argument is an offset within the index buffer.
 	wgpuRenderPassEncoderDrawIndexed(renderPass, m_indexCount, 1, 0, 0, 0);
 
 	wgpuRenderPassEncoderEnd(renderPass);
@@ -128,6 +137,7 @@ void Application::RenderPassEncoder(const WGPUTextureView& targetView)
 	cmdBufferDescriptor.label = toWgpuStringView("Command buffer");
 	WGPUCommandBuffer command = wgpuCommandEncoderFinish(encoder, &cmdBufferDescriptor);
 	wgpuCommandEncoderRelease(encoder);
+
 
 	// Submit the command queue
 	std::cout << "Submitting command..." << std::endl;
@@ -143,9 +153,14 @@ void Application::MainLoop()
 	glfwPollEvents();
 	wgpuInstanceProcessEvents(m_instance);
 
+	float t = static_cast<float>(glfwGetTime()); // glfwGetTime returns a double
+	wgpuQueueWriteBuffer(m_queue, m_uniformBuffer, 0, &t, sizeof(float));
+
 	// Get the next target texture view
 	WGPUTextureView targetView = GetNextSurfaceView();
 	if (!targetView) return;
+
+
 
 
 	RenderPassEncoder(targetView);
@@ -264,7 +279,9 @@ bool Application::InitializePipeline()
 	WGPUShaderSourceWGSL wgslDesc = WGPU_SHADER_SOURCE_WGSL_INIT;
 	std::cout << "Creating shader module..." << std::endl;
 	WGPUShaderModule shaderModule = ResourceManager::loadShaderModule(RESOURCE_DIR "/shader.wgsl", m_device);
+	std::cout << "Shader module: " << shaderModule << std::endl;
 	if (shaderModule == nullptr) return false;
+
 
 	WGPURenderPipelineDescriptor pipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
 	// Vertex fetch
@@ -303,8 +320,43 @@ bool Application::InitializePipeline()
 	fragmentState.targetCount = 1;
 	fragmentState.targets = &colorTarget;
 	pipelineDesc.fragment = &fragmentState;
+
+
+	// Define binding layout
+	WGPUBindGroupLayoutEntry bindingLayout = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+	// The binding index as used in the @binding attribute in the shader
+	bindingLayout.binding = 0;
+	bindingLayout.visibility = WGPUShaderStage_Vertex;
+	bindingLayout.buffer.type = WGPUBufferBindingType_Uniform;
+	bindingLayout.buffer.minBindingSize = 4 * sizeof(float);
+
+	// Create a bind group layout
+	WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+	bindGroupLayoutDesc.nextInChain = nullptr;
+	bindGroupLayoutDesc.entryCount = 1;
+	bindGroupLayoutDesc.entries = &bindingLayout;
+	m_bindGroupLayout = wgpuDeviceCreateBindGroupLayout(m_device, &bindGroupLayoutDesc);
+
+	// Create the pipeline layout
+	WGPUPipelineLayoutDescriptor layoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+	layoutDesc.nextInChain = nullptr;
+	layoutDesc.bindGroupLayoutCount = 1;
+	layoutDesc.bindGroupLayouts = &m_bindGroupLayout;
+	m_layout = wgpuDeviceCreatePipelineLayout(m_device, &layoutDesc);
+
+	pipelineDesc.layout = m_layout;
+
+
 	m_pipeline = wgpuDeviceCreateRenderPipeline(m_device, &pipelineDesc);
 	wgpuShaderModuleRelease(shaderModule);
+
+
+
+
+
+
+
+
 	return true;
 }
 
@@ -313,12 +365,13 @@ bool Application::InitializeBuffers()
 	std::vector<float> pointData;
 	std::vector<uint16_t> indexData;
 
+	// 1. Load from disk into CPU-side vectors pointData and indexData
 	bool success = ResourceManager::loadGeometry(RESOURCE_DIR "/webgpu.txt", pointData, indexData);
 	if (!success) return false;
 
 	m_indexCount = static_cast<uint32_t>(indexData.size());
 
-	// Create point buffers
+	// 2. Create GPU buffers and upload data to them
 	WGPUBufferDescriptor bufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
 	bufferDesc.size = pointData.size() * sizeof(float);
 	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
@@ -338,7 +391,46 @@ bool Application::InitializeBuffers()
 	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Index;;
 	m_indexBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
 
+
+	// 3. Create and fill uniform buffer
+	// Create uniform buffer (reusing bufferDesc from other buffer creations)
+	// The buffer will only contain 1 float with the value of uTime
+	// then 3 floats left empty but needed by alignment constraints
+	bufferDesc.size = 4 * sizeof(float);
+
+	// Make sure to flag the buffer as BufferUsage::Uniform
+	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
+
+	m_uniformBuffer = wgpuDeviceCreateBuffer(m_device, &bufferDesc);
+
+	float currentTime = 1.0f;
+	wgpuQueueWriteBuffer(m_queue, m_uniformBuffer, 0, &currentTime, sizeof(float));
+
 	wgpuQueueWriteBuffer(m_queue, m_indexBuffer, 0, indexData.data(), bufferDesc.size);
 	// Create index buffer
 	return true;
 }
+void Application::InitializeBindGroups()
+{
+	// Create a binding
+	WGPUBindGroupEntry binding = WGPU_BIND_GROUP_ENTRY_INIT;
+
+	// The index of the binding (the entries in bindGroupDesc can be in any order)
+	binding.binding = 0;
+	// The buffer it is actually bound to
+	binding.buffer = m_uniformBuffer;
+	// We can specify an offset within the buffer, so that a single buffer can hold
+	// multiple uniform blocks.
+	binding.offset = 0;
+	// And we specify again the size of the buffer.
+	binding.size = 4 * sizeof(float);
+
+	// A bind group contains one or multiple bindings
+	WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+	bindGroupDesc.layout = m_bindGroupLayout;
+	// There must be as many bindings as declared in the layout!
+	bindGroupDesc.entryCount = 1;
+	bindGroupDesc.entries = &binding;
+	m_bindGroup = wgpuDeviceCreateBindGroup(m_device, &bindGroupDesc);
+}
+

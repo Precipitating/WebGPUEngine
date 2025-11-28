@@ -31,6 +31,7 @@ private:
     WGPUAdapter SetupAdapter();
     bool InitializePipeline();
     bool InitializeBuffers();
+    void InitializeBindGroups();
 
 private:
     GLFWwindow* m_window = nullptr;
@@ -49,6 +50,12 @@ private:
     WGPUBuffer m_pointBuffer = nullptr;
     WGPUBuffer m_indexBuffer = nullptr;
     uint32_t m_indexCount = 0;
+
+    WGPUBuffer m_uniformBuffer = nullptr;
+
+    WGPUPipelineLayout m_layout = nullptr;
+    WGPUBindGroupLayout m_bindGroupLayout = nullptr;
+    WGPUBindGroup m_bindGroup = nullptr;
 
 
 
