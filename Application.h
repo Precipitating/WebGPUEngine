@@ -53,6 +53,9 @@ private:
     WGPUBindGroupLayout m_bindGroupLayout = nullptr;
     WGPUBindGroup m_bindGroup = nullptr;
 
+    WGPUTextureFormat m_depthTextureFormat = WGPUTextureFormat_Depth24Plus;
+    WGPUTextureView m_depthTextureView = nullptr;
+
 
 private:
     struct MyUniforms

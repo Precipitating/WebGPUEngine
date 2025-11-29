@@ -26,6 +26,8 @@ bool Application::Initialize()
 	//SetAdapterLimits(adapter);
 	//InspectAdapter(adapter);
 
+
+
 	// Device setup
 	SetupDevice(adapter);
 	// Command queue
@@ -33,6 +35,20 @@ bool Application::Initialize()
 
 	// Surface setup
 	SetupSurfaceConfig(adapter);
+
+
+	// Create the depth texture
+	WGPUTextureDescriptor depthTextureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+	depthTextureDesc.label = toWgpuStringView("Z Buffer");
+	depthTextureDesc.usage = WGPUTextureUsage_RenderAttachment;
+	depthTextureDesc.size = { 640, 480, 1 };
+	depthTextureDesc.format = m_depthTextureFormat;
+	WGPUTexture depthTexture = wgpuDeviceCreateTexture(m_device, &depthTextureDesc);
+	// Create the view of the depth texture manipulated by the rasterizer
+	m_depthTextureView = wgpuTextureCreateView(depthTexture, nullptr);
+
+	// We can now release the texture and only hold to the view
+	wgpuTextureRelease(depthTexture);
 
 	// We no longer need to access the adapter once we have the device
 	wgpuAdapterRelease(adapter);
@@ -52,6 +68,7 @@ void Application::Terminate()
 	wgpuBufferRelease(m_pointBuffer);
 	wgpuBufferRelease(m_indexBuffer);
 	wgpuBufferRelease(m_vertexBuffer);
+	wgpuTextureViewRelease(m_depthTextureView);
 	wgpuRenderPipelineRelease(m_pipeline);
 	wgpuSurfaceUnconfigure(m_surface);
 	wgpuQueueRelease(m_queue);
@@ -115,6 +132,22 @@ void Application::RenderPassEncoder(const WGPUTextureView& targetView)
 	colorAttachment.clearValue = WGPUColor{ 0, 0, 0, 1.0 };
 	renderPassDesc.colorAttachmentCount = 1;
 	renderPassDesc.colorAttachments = &colorAttachment;
+
+	// We now add a depth/stencil attachment:
+	WGPURenderPassDepthStencilAttachment depthStencilAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+	// The view of the depth texture
+	depthStencilAttachment.view = m_depthTextureView;
+
+	// The initial value of the depth buffer, meaning "far"
+	depthStencilAttachment.depthClearValue = 1.0f;
+
+	// Operation settings comparable to the color attachment
+	depthStencilAttachment.depthLoadOp = WGPULoadOp_Clear;
+	depthStencilAttachment.depthStoreOp = WGPUStoreOp_Store;
+
+	// we could turn off writing to the depth buffer globally here
+	depthStencilAttachment.depthReadOnly = false; // NB: this is the default
+	renderPassDesc.depthStencilAttachment = &depthStencilAttachment;
 
 	// render pass encoder
 	WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDesc);
@@ -310,7 +343,15 @@ bool Application::InitializePipeline()
 	pipelineDesc.vertex.bufferCount = 1;
 	pipelineDesc.vertex.buffers = &vertexBufferLayout;
 	pipelineDesc.vertex.module = shaderModule;
+
 	pipelineDesc.vertex.entryPoint = toWgpuStringView("vs_main");
+	// depth stencil
+	WGPUDepthStencilState depthStencilState = WGPU_DEPTH_STENCIL_STATE_INIT;
+	pipelineDesc.depthStencil = &depthStencilState;
+	depthStencilState.depthCompare = WGPUCompareFunction_Less;
+	depthStencilState.depthWriteEnabled = WGPUOptionalBool_True;
+	depthStencilState.format = m_depthTextureFormat;
+
 	WGPUFragmentState fragmentState = WGPU_FRAGMENT_STATE_INIT;
 	fragmentState.module = shaderModule;
 	fragmentState.entryPoint = toWgpuStringView("fs_main");
