@@ -292,17 +292,17 @@ bool Application::InitializePipeline()
 
 	// Describe the position attribute
 	vertexAttribs[0].shaderLocation = 0; // @location(0)
-	vertexAttribs[0].format = WGPUVertexFormat_Float32x2;
+	vertexAttribs[0].format = WGPUVertexFormat_Float32x3;
 	vertexAttribs[0].offset = 0;
 	// Describe the color attribute
 	vertexAttribs[1].shaderLocation = 1; // @location(1)
 	vertexAttribs[1].format = WGPUVertexFormat_Float32x3; // different type!
-	vertexAttribs[1].offset = 2 * sizeof(float); // non null offset!
+	vertexAttribs[1].offset = 3 * sizeof(float); // non null offset!
 
 	vertexBufferLayout.attributeCount = static_cast<uint32_t>(vertexAttribs.size());
 	vertexBufferLayout.attributes = vertexAttribs.data();
 
-	vertexBufferLayout.arrayStride = 5 * sizeof(float);
+	vertexBufferLayout.arrayStride = 6 * sizeof(float);
 	//                               ^^^^^^^^^^^^^^^^^ The new stride
 	vertexBufferLayout.stepMode = WGPUVertexStepMode_Vertex;
 
@@ -367,7 +367,7 @@ bool Application::InitializeBuffers()
 	std::vector<uint16_t> indexData;
 
 	// 1. Load from disk into CPU-side vectors pointData and indexData
-	bool success = ResourceManager::loadGeometry(RESOURCE_DIR "/webgpu.txt", pointData, indexData);
+	bool success = ResourceManager::loadGeometry(RESOURCE_DIR "/pyramid.txt", pointData, indexData, 3);
 	if (!success) return false;
 
 	m_indexCount = static_cast<uint32_t>(indexData.size());
