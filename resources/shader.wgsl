@@ -83,9 +83,31 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 	
 	let homogeneous_position = vec4f(position, 1.0);
 	position = (R2 * R1 * T * S * homogeneous_position).xyz;
+
+	// We move the view point so that all Z coordinates are > 0
+	// (this did not make a difference with the orthographic projection
+	// but does now.)
+
+	let focalPoint = vec3f(0.0, 0.0, -2.0);
+	position = position - focalPoint;
+
+	// We divide by the Z coord
+	position.x /= position.z;
+	position.y /= position.z;
+
+	let near = 0.0;
+	let far = 100.0;
+	let scale = 1.0;
+
+	let P = transpose(mat4x4f(
+    1.0 / scale,      0.0,           0.0,                  0.0,
+        0.0,     ratio / scale,      0.0,                  0.0,
+        0.0,          0.0,      1.0 / (far - near), -near / (far - near),
+        0.0,          0.0,           0.0,                  1.0,
+));
 	
 	// Apply viewport transform "the old way", we'll see a proper matrix-based way in next chapter
-	out.position = vec4f(position.x, position.y * ratio, position.z * 0.5 + 0.5, 1.0);
+	out.position = P * vec4f(position, 1.0);
 	out.color = in.color;
 	return out;
 }
